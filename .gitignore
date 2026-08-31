@@ -1,0 +1,36 @@
+# Environment
+.env
+
+# Python
+__pycache__
+__pycache__/
+.pytest_cache
+.coverage
+.python-version
+
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Database (generated — re-create with python -m db.loader)
+portfolio_database.db
+*.db
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+
+# UI
+# .streamlit/ 
+.pyrefly.toml
+.vscode/
+.agent/
+.pytest_cache/
+.venv_agent
+
+# Test
+.deepeval/
