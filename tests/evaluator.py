@@ -179,6 +179,36 @@ def compare_exposure_results(agent_result: Any) -> bool:
     return math.isclose(total_pct, 100.0, abs_tol=1.0)
 
 
+def check_result_type_match(expected_type: str, tool_result: Any, qtype: str) -> bool:
+    """Validate whether the returned tool result matches the expected structural data type."""
+    if not tool_result:
+        return False
+    if not expected_type:
+        return True
+    
+    exp_clean = expected_type.lower().strip()
+    if exp_clean in {"sector_exposure_breakdown", "exposure"}:
+        if isinstance(tool_result, dict) and "exposures" in tool_result:
+            return True
+        if isinstance(tool_result, list) and all(isinstance(x, dict) and "exposures" in x for x in tool_result):
+            return True
+        return False
+
+    if exp_clean in {"scalar_number", "single_value", "number"}:
+        if isinstance(tool_result, (int, float)):
+            return True
+        if isinstance(tool_result, list) and len(tool_result) == 1 and len(tool_result[0]) == 1:
+            return True
+        return False
+
+    if exp_clean in {"table", "list", "records"}:
+        if isinstance(tool_result, list) and len(tool_result) >= 1:
+            return True
+        return False
+
+    return True
+
+
 def json_to_markdown(data: dict[str, Any] | str | Path) -> str:
     """
     Transform an evaluation JSON report (dict, string, or file path) into a structured Markdown document.
@@ -203,6 +233,7 @@ def json_to_markdown(data: dict[str, Any] | str | Path) -> str:
 
     total_q: int = int(data.get("total_questions") or len(results))
     routing_acc: float = float(data.get("correct_routing_pct") or data.get("routing_accuracy_pct") or 0.0)
+    type_acc: float = float(data.get("result_type_match_pct") or 100.0)
     exec_rate: float = float(data.get("successful_execution_pct") or data.get("execution_rate_pct") or 0.0)
     sql_sim: float = float(data.get("sql_similarity_pct") or data.get("avg_sql_similarity_pct") or 0.0)
     match_rate: float = float(data.get("correct_matches_pct") or data.get("result_match_pct") or 0.0)
@@ -216,6 +247,7 @@ def json_to_markdown(data: dict[str, Any] | str | Path) -> str:
         "| Metric | Result | Status |",
         "| :--- | :---: | :---: |",
         f"| **Tool Routing Accuracy** | **{routing_acc:.1f}%** | {'✅ PASSED' if routing_acc >= 90 else '⚠️ REVIEW'} |",
+        f"| **Result Type Match Rate** | **{type_acc:.1f}%** | {'✅ PASSED' if type_acc >= 90 else '⚠️ REVIEW'} |",
         f"| **Execution Success Rate** | **{exec_rate:.1f}%** | {'✅ PASSED' if exec_rate == 100 else '⚠️ REVIEW'} |",
         f"| **SQL Structural Similarity** | **{sql_sim:.1f}%** | {'✅ PASSED' if sql_sim >= 80 else '⚠️ REVIEW'} |",
         f"| **Data / Result Match Rate** | **{match_rate:.1f}%** | {'✅ PASSED' if match_rate >= 85 else '⚠️ REVIEW'} |",
@@ -230,6 +262,8 @@ def json_to_markdown(data: dict[str, Any] | str | Path) -> str:
         qtext = r.get("question")
         exp_tool = r.get("expected_tool")
         act_tool = r.get("actual_tool")
+        exp_type = r.get("expected_result_type", "table")
+        type_ok = r.get("type_correct", "✅" if r.get("type_match") else "❌")
         tool_ok = r.get("routing_correct", "✅" if r.get("tool_correct") else "❌")
         sql_sim_q = r.get("sql_similarity_pct", 100)
         data_ok = r.get("result_correct", "✅" if r.get("result_match") else "❌")
@@ -243,9 +277,10 @@ def json_to_markdown(data: dict[str, Any] | str | Path) -> str:
         lines.append(f"### 🔹 Question {qid}: {qtext}\n")
         lines.append(f"- **Type:** `{qtype}` | **Difficulty:** `{diff}` | **Latency:** `{lat:.2f}s`")
         lines.append(f"- **Tool Routing:** Expected `{exp_tool}` vs Actual `{act_tool}` ({tool_ok})")
+        lines.append(f"- **Result Type Match:** Expected `{exp_type}` ({type_ok})")
         if exp_sql or act_sql:
             lines.append(f"- **SQL Structural Similarity:** **{sql_sim_q:.0f}%**")
-        lines.append(f"- **Data / Result Match:** {data_ok}\n")
+        lines.append(f"- **Data Match:** {data_ok}\n")
 
         if exp_sql:
             lines.append(f"**Ground Truth SQL:**\n```sql\n{exp_sql}\n```\n")
@@ -281,15 +316,16 @@ def evaluate_dataset(
     questions = data.get("questions", [])
     results: list[dict[str, Any]] = []
 
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 90)
     print("  📊 Portfolio Analytics Agent — Evaluation Report")
-    print("=" * 80)
+    print("=" * 90)
     print(
-        f" {'#':<2} │ {'Type':<12} │ {'Difficulty':<10} │ {'Tool ✓':<6} │ {'Executed':<8} │ {'SQL Sim':<8} │ {'Match':<6} │ {'Time':<6}"
+        f" {'#':<2} │ {'Type':<12} │ {'Difficulty':<10} │ {'Tool ✓':<6} │ {'Type ✓':<6} │ {'Data Match':<10} │ {'SQL Sim':<8} │ {'Time':<6}"
     )
-    print("─" * 4 + "┼" + "─" * 14 + "┼" + "─" * 12 + "┼" + "─" * 8 + "┼" + "─" * 10 + "┼" + "─" * 10 + "┼" + "─" * 8 + "┼" + "─" * 8)
+    print("─" * 4 + "┼" + "─" * 14 + "┼" + "─" * 12 + "┼" + "─" * 8 + "┼" + "─" * 8 + "┼" + "─" * 12 + "┼" + "─" * 10 + "┼" + "─" * 8)
 
     correct_routing = 0
+    correct_types = 0
     successful_execution = 0
     correct_matches = 0
     total_sql_sim = 0.0
@@ -303,6 +339,8 @@ def evaluate_dataset(
             qtype = item["type"]
             difficulty = item.get("difficulty", "medium")
             question_text = item["question"]
+            gt_info = item.get("ground_truth", {})
+            expected_result_type = gt_info.get("expected_result_type", "table")
 
             # Expected tool
             if qtype == "text2sql":
@@ -313,7 +351,7 @@ def evaluate_dataset(
                 expected_tool = "exposure_calculator"
 
             # Ground truth execution
-            gt_sql = item.get("ground_truth", {}).get("sql_query", "")
+            gt_sql = gt_info.get("sql_query", "")
             gt_rows: list[dict[str, Any]] = []
             if gt_sql:
                 try:
@@ -330,6 +368,10 @@ def evaluate_dataset(
             actual_tool = response.get("tool_name", "")
             is_tool_correct = actual_tool == expected_tool
             is_executed = response.get("success", False)
+            tool_result = response.get("tool_result")
+
+            # Result Type Match
+            is_type_match = check_result_type_match(expected_result_type, tool_result, qtype) if is_executed else False
 
             # Measure SQL semantic similarity
             agent_sql = response.get("sql", "")
@@ -339,27 +381,28 @@ def evaluate_dataset(
             is_match = False
             if is_executed:
                 if qtype == "text2sql":
-                    is_match = compare_sql_results(response.get("tool_result"), gt_rows)
+                    is_match = compare_sql_results(tool_result, gt_rows)
                 elif qtype in {"exposure_calculator", "hybrid", "hybrid_exposure_tool"}:
-                    is_match = compare_exposure_results(response.get("tool_result"))
+                    is_match = compare_exposure_results(tool_result)
 
             if is_tool_correct:
                 correct_routing += 1
+            if is_type_match:
+                correct_types += 1
             if is_executed:
                 successful_execution += 1
             if is_match:
                 correct_matches += 1
 
             tool_icon = "✅" if is_tool_correct else "❌"
-            exec_icon = "✅" if is_executed else "❌"
+            type_icon = "✅" if is_type_match else "❌"
             match_icon = "✅" if is_match else "❌"
             sim_str = f"{sql_sim:.0f}%"
 
             print(
-                f" {qid:<2} │ {qtype:<12} │ {difficulty:<10} │ {tool_icon:<6} │ {exec_icon:<8} │ {sim_str:<8} │ {match_icon:<6} │ {latency_s:.2f}s"
+                f" {qid:<2} │ {qtype:<12} │ {difficulty:<10} │ {tool_icon:<6} │ {type_icon:<6} │ {match_icon:<10} │ {sim_str:<8} │ {latency_s:.2f}s"
             )
 
-            gt_info = item.get("ground_truth", {})
             if gt_sql:
                 gt_output = gt_rows
             else:
@@ -367,9 +410,8 @@ def evaluate_dataset(
                 exp_port = gt_info.get("expected_portfolio") or gt_info.get("parameters", {}).get("portfolio_name")
                 if exp_port:
                     gt_output["expected_portfolio"] = exp_port
-                exp_type = gt_info.get("expected_result_type")
-                if exp_type:
-                    gt_output["expected_result_type"] = exp_type
+                if expected_result_type:
+                    gt_output["expected_result_type"] = expected_result_type
 
             results.append(
                 {
@@ -379,6 +421,9 @@ def evaluate_dataset(
                     "question": question_text,
                     "expected_tool": expected_tool,
                     "actual_tool": actual_tool,
+                    "expected_result_type": expected_result_type,
+                    "type_match": is_type_match,
+                    "type_correct": "✅" if is_type_match else "❌",
                     "tool_correct": is_tool_correct,
                     "routing_correct": "✅" if is_tool_correct else "❌",
                     "execution_success": is_executed,
@@ -396,24 +441,28 @@ def evaluate_dataset(
             )
 
     total_q = len(questions)
+
     avg_latency = (total_time_s / total_q) if total_q > 0 else 0.0
     routing_acc = (correct_routing / total_q * 100) if total_q > 0 else 0.0
+    type_acc = (correct_types / total_q * 100) if total_q > 0 else 0.0
     exec_rate = (successful_execution / total_q * 100) if total_q > 0 else 0.0
     match_rate = (correct_matches / total_q * 100) if total_q > 0 else 0.0
     avg_sql_sim = (total_sql_sim / total_q) if total_q > 0 else 0.0
 
-    print("=" * 80)
-    print(f"Routing Accuracy   : {correct_routing}/{total_q} ({routing_acc:.1f}%)")
-    print(f"Execution Rate     : {successful_execution}/{total_q} ({exec_rate:.1f}%)")
-    print(f"SQL Similarity     : {avg_sql_sim:.1f}%")
-    print(f"Result Match       : {correct_matches}/{total_q} ({match_rate:.1f}%)")
-    print(f"Avg Latency        : {avg_latency:.2f}s per question")
-    print("=" * 80 + "\n")
+    print("=" * 90)
+    print(f"Routing Accuracy       : {correct_routing}/{total_q} ({routing_acc:.1f}%)")
+    print(f"Result Type Match Rate : {correct_types}/{total_q} ({type_acc:.1f}%)")
+    print(f"Execution Rate         : {successful_execution}/{total_q} ({exec_rate:.1f}%)")
+    print(f"SQL Similarity         : {avg_sql_sim:.1f}%")
+    print(f"Data Match Rate        : {correct_matches}/{total_q} ({match_rate:.1f}%)")
+    print(f"Avg Latency            : {avg_latency:.2f}s per question")
+    print("=" * 90 + "\n")
 
     summary = {
         "total_questions": total_q,
         "correct_routing_pct": round(routing_acc, 2),
         "routing_accuracy_pct": round(routing_acc, 2),
+        "result_type_match_pct": round(type_acc, 2),
         "successful_execution_pct": round(exec_rate, 2),
         "execution_rate_pct": round(exec_rate, 2),
         "sql_similarity_pct": round(avg_sql_sim, 2),

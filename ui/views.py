@@ -429,12 +429,14 @@ def render_benchmark_view(api_client: AsyncAPIClient) -> None:
                 st.success("Benchmark completed!")
 
                 # Minimalist Scorecards
-                c1, c2, c3, c4, c5 = st.columns(5)
+                c1, c2, c3, c4, c5, c6 = st.columns(6)
                 c1.metric("Questions", eval_data.get("total_questions", 0))
                 c2.metric("Routing Accuracy", f"{eval_data.get('correct_routing_pct', 0):.0f}%")
-                c3.metric("SQL Similarity", f"{eval_data.get('sql_similarity_pct', 100):.0f}%")
-                c4.metric("Result Match", f"{eval_data.get('correct_matches_pct', 0):.0f}%")
-                c5.metric("Avg Latency", f"{eval_data.get('avg_latency_seconds', 0):.2f}s")
+                c3.metric("Type Match", f"{eval_data.get('result_type_match_pct', 100):.0f}%")
+                c4.metric("SQL Similarity", f"{eval_data.get('sql_similarity_pct', 100):.0f}%")
+                c5.metric("Data Match", f"{eval_data.get('correct_matches_pct', 0):.0f}%")
+                c6.metric("Avg Latency", f"{eval_data.get('avg_latency_seconds', 0):.2f}s")
+
 
                 results = eval_data.get("results", [])
                 if results:
@@ -450,8 +452,9 @@ def render_benchmark_view(api_client: AsyncAPIClient) -> None:
                         "expected_tool",
                         "actual_tool",
                         "routing_correct",
-                        "sql_similarity_pct",
+                        "type_correct",
                         "result_correct",
+                        "sql_similarity_pct",
                         "latency_seconds",
                     ]
                     available_cols = [c for c in display_cols if c in df_results.columns]
@@ -463,8 +466,9 @@ def render_benchmark_view(api_client: AsyncAPIClient) -> None:
                                 "expected_tool": "Expected Tool",
                                 "actual_tool": "Actual Tool",
                                 "routing_correct": "Tool Match",
-                                "sql_similarity_pct": "SQL Similarity",
+                                "type_correct": "Type Match",
                                 "result_correct": "Data Match",
+                                "sql_similarity_pct": "SQL Similarity",
                                 "latency_seconds": "Latency (s)",
                             }
                         ),
